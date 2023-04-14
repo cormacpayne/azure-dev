@@ -142,8 +142,8 @@ func (p *dockerProject) Build(
 			)
 
 			// Build the container
-			task.SetProgress(NewServiceProgress("Building docker image"))
-			imageId, err := p.docker.Build(
+			task.SetProgress(NewServiceProgress("Building docker image using the Paketo builder"))
+			imageId, err := p.docker.BuildWithPack(
 				ctx,
 				serviceConfig.Path(),
 				dockerOptions.Path,

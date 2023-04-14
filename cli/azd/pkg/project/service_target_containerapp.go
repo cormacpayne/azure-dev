@@ -17,7 +17,6 @@ import (
 	"github.com/azure/azure-dev/cli/azd/pkg/environment"
 	"github.com/azure/azure-dev/cli/azd/pkg/exec"
 	"github.com/azure/azure-dev/cli/azd/pkg/infra"
-	"github.com/azure/azure-dev/cli/azd/pkg/infra/provisioning"
 	"github.com/azure/azure-dev/cli/azd/pkg/input"
 	"github.com/azure/azure-dev/cli/azd/pkg/output"
 	"github.com/azure/azure-dev/cli/azd/pkg/output/ux"
@@ -126,56 +125,18 @@ func (at *containerAppTarget) Deploy(
 				return
 			}
 
-			infraManager, err := provisioning.NewManager(
-				ctx,
-				at.env,
-				serviceConfig.Project.Path,
-				serviceConfig.Infra,
-				at.console.IsUnformatted(),
-				at.cli,
-				&mutedConsole{
-					parentConsole: at.console,
-				}, // hide the bicep deployment output.
-				at.commandRunner,
-				at.accountManager,
-				at.userProfileService,
-				at.subscriptionTenantResolver,
-				at.alphaFeatureManager,
-			)
-			if err != nil {
-				task.SetError(fmt.Errorf("creating provisioning manager: %w", err))
-				return
+			task.SetProgress(NewServiceProgress("Updating Container App based on pushed image"))
+			remoteTag, err := at.containerHelper.RemoteImageTag(ctx, serviceConfig, packageOutput.PackagePath)
+			args := []string{
+				"containerapp", "update",
+				"--name", targetResource.ResourceName(),
+				"--resource-group", targetResource.ResourceGroupName(),
+				"--image", remoteTag,
 			}
-
-			task.SetProgress(NewServiceProgress("Creating deployment template"))
-			deploymentPlan, err := infraManager.Plan(ctx)
-			if err != nil {
-				task.SetError(fmt.Errorf("planning provisioning: %w", err))
-				return
-			}
-
-			task.SetProgress(NewServiceProgress("Updating container app image reference"))
-			deploymentName := fmt.Sprintf("%s-%s", at.env.GetEnvName(), serviceConfig.Name)
-			scope := infra.NewResourceGroupScope(
-				at.cli,
-				targetResource.SubscriptionId(),
-				targetResource.ResourceGroupName(),
-				deploymentName,
-			)
-			deployResult, err := infraManager.Deploy(ctx, deploymentPlan, scope)
-
-			if err != nil {
-				task.SetError(fmt.Errorf("provisioning infrastructure for app deployment: %w", err))
-				return
-			}
-
-			if len(deployResult.Deployment.Outputs) > 0 {
-				log.Printf("saving %d deployment outputs", len(deployResult.Deployment.Outputs))
-				if err := provisioning.UpdateEnvironment(at.env, deployResult.Deployment.Outputs); err != nil {
-					task.SetError(fmt.Errorf("saving outputs to environment: %w", err))
-					return
-				}
-			}
+			runArgs := exec.NewRunArgs("az", args...).
+				WithCwd("").
+				WithEnrichError(true)
+			at.commandRunner.Run(ctx, runArgs)
 
 			if targetResource.ResourceName() == "" {
 				azureResource, err := at.resourceManager.GetServiceResource(
@@ -219,7 +180,6 @@ func (at *containerAppTarget) Deploy(
 					targetResource.ResourceName(),
 				),
 				Kind:      ContainerAppTarget,
-				Details:   deployResult,
 				Endpoints: endpoints,
 			})
 		},

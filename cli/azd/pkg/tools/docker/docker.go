@@ -24,6 +24,14 @@ type Docker interface {
 		buildContext string,
 		name string,
 	) (string, error)
+	BuildWithPack(
+		ctx context.Context,
+		cwd string,
+		dockerFilePath string,
+		platform string,
+		buildContext string,
+		name string,
+	) (string, error)
 	Tag(ctx context.Context, cwd string, imageName string, tag string) error
 	Push(ctx context.Context, cwd string, tag string) error
 }
@@ -85,6 +93,33 @@ func (d *docker) Build(
 	}
 
 	return strings.TrimSpace(res.Stdout), nil
+}
+
+func (d *docker) BuildWithPack(
+	ctx context.Context,
+	cwd string,
+	dockerFilePath string,
+	platform string,
+	buildContext string,
+	tagName string,
+) (string, error) {
+	if strings.TrimSpace(platform) == "" {
+		platform = "amd64"
+	}
+
+	args := []string{
+		"build", tagName,
+		"--builder", "paketobuildpacks/builder:base",
+		// "--publish", --> Need to determine if we can get ACR instance before this is called
+	}
+
+	res, err := d.executePackCommand(ctx, cwd, args...)
+	if err != nil {
+		return "", fmt.Errorf("building image: %s: %w", res.String(), err)
+	}
+
+	// Replacing the sha:abc123... with provided tag name, need to determine if we can get sha from pack
+	return tagName, nil
 }
 
 func (d *docker) Tag(ctx context.Context, cwd string, imageName string, tag string) error {
@@ -219,6 +254,14 @@ func (d *docker) Name() string {
 
 func (d *docker) executeCommand(ctx context.Context, cwd string, args ...string) (exec.RunResult, error) {
 	runArgs := exec.NewRunArgs("docker", args...).
+		WithCwd(cwd).
+		WithEnrichError(true)
+
+	return d.commandRunner.Run(ctx, runArgs)
+}
+
+func (d *docker) executePackCommand(ctx context.Context, cwd string, args ...string) (exec.RunResult, error) {
+	runArgs := exec.NewRunArgs("pack", args...).
 		WithCwd(cwd).
 		WithEnrichError(true)
 
